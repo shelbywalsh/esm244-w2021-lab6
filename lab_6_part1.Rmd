@@ -1,0 +1,109 @@
+---
+title: "lab_6"
+author: "Shelby Walsh"
+date: "2/11/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(here)
+library(janitor)
+library(sf)
+library(tmap)
+library(gstat)
+library(stars)
+```
+
+```{r}
+ca_dgw <- read_sf(here("ca_dgw"), layer = "F2013_DBGS_Points_20150720_093252") %>% 
+  clean_names()
+
+st_crs(ca_dgw)
+
+ca_counties <- read_sf(here("ca_counties"), layer = "CA_Counties_TIGER2016") %>% 
+  clean_names() %>% 
+  select(name)
+
+st_crs(ca_counties)
+
+ca_counties <- st_transform(ca_counties, st_crs(ca_dgw))
+
+st_crs(ca_counties)
+```
+
+```{r}
+ggplot() +
+  geom_sf(data = ca_counties) +
+  geom_sf(data = ca_dgw, aes(color = dgbs))
+
+```
+
+```{r}
+tmap_mode("view")
+
+tm_shape(ca_dgw) +
+  tm_dots("dgbs")
+```
+
+```{r}
+sj_county <- ca_counties %>% 
+  filter(name == "San Joaquin")
+
+sj_depth <- ca_dgw %>% 
+  st_intersection(sj_county)
+
+plot(sj_depth)
+
+
+ggplot() +
+  geom_sf(data = sj_county) +
+  geom_sf(data = sj_depth, aes(color = dgbs))
+```
+
+
+```{r}
+well_duplicate <- sj_depth %>% 
+  get_dupes(latitude, longitude)
+
+sj_depth <- sj_depth %>% 
+  filter(!local_well %in% well_duplicate$local_well)
+
+sj_depth %>% 
+  get_dupes(latitude, longitude)
+```
+
+
+### Creat a variagram
+```{r}
+sj_dgw_vgm <- variogram(dgbs ~ 1, data = sj_depth)
+
+plot(sj_dgw_vgm)
+
+sj_dgw_vgm_fir <- fit.variogram(sj_dgw_vgm, model = vgm(nugget = 20, psill = 3000, range = 30, model = "Gau") )
+
+sj_dgw_vgm_fir
+
+plot(sj_dgw_vgm, sj_dgw_vgm_fir)
+
+```
+
+
+## Spacial Kriging
+```{r}
+sj_grid <- st_bbox(sj_county) %>% 
+  st_as_stars(dx = 0.01, dy = 0.01) %>% 
+  st_set_crs(4326) %>% 
+  st_crop(sj_county)
+
+
+```
+
+```{r}
+sj_dgw_krig <- krige(dgbs ~ 1, sj_depth, sj_grid, model = sj_dgw_vgm_fir)
+
+plot(sj_dgw_krig)
+```
+
+
